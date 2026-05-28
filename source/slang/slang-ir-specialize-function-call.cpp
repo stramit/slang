@@ -623,6 +623,28 @@ struct FunctionParameterSpecializationContext
 
             ioInfo.newArgs.add(oldIndex);
         }
+        else if (oldArg->getOp() == kIROp_ByteAddressBufferLoad)
+        {
+            // Like the element-access case above, but with an extra `alignment` operand.
+            auto oldBuffer = oldArg->getOperand(0);
+            auto oldOffset = oldArg->getOperand(1);
+            auto oldAlignment = oldArg->getOperand(2);
+
+            getCallInfoForArg(ioInfo, oldBuffer);
+
+            List<IRAttr*> offsetAttrs;
+            if (findNonuniformIndexInst(oldOffset))
+            {
+                offsetAttrs.add(getBuilder()->getAttr(kIROp_NonUniformAttr));
+            }
+            ioInfo.key.vals.add(
+                getBuilder()->getAttributedType(oldOffset->getDataType(), offsetAttrs));
+            ioInfo.newArgs.add(oldOffset);
+
+            ioInfo.key.vals.add(
+                getBuilder()->getAttributedType(oldAlignment->getDataType(), List<IRAttr*>()));
+            ioInfo.newArgs.add(oldAlignment);
+        }
         else if (isFieldAccessInst(oldArg))
         {
             // This is the case where the `oldArg` is
@@ -806,7 +828,6 @@ struct FunctionParameterSpecializationContext
         case kIROp_GetElement:
         case kIROp_RWStructuredBufferGetElementPtr:
         case kIROp_StructuredBufferLoad:
-        case kIROp_ByteAddressBufferLoad:
             return true;
         }
         return false;
@@ -911,6 +932,29 @@ struct FunctionParameterSpecializationContext
             IRInst* newOperands[] = {newBase, newIndex};
             auto newVal =
                 builder->emitIntrinsicInst(oldArg->getFullType(), oldArg->getOp(), 2, newOperands);
+
+            return newVal;
+        }
+        else if (oldArg->getOp() == kIROp_ByteAddressBufferLoad)
+        {
+            // Parallel to the element-access case above, with an extra `alignment` operand.
+            auto oldBuffer = oldArg->getOperand(0);
+            auto oldOffset = oldArg->getOperand(1);
+            auto oldAlignment = oldArg->getOperand(2);
+
+            auto newBuffer = getSpecializedValueForArg(ioInfo, oldBuffer);
+
+            auto builder = getBuilder();
+            auto newOffset = builder->createParam(oldOffset->getFullType());
+            ioInfo.newParams.add(newOffset);
+
+            auto newAlignment = builder->createParam(oldAlignment->getFullType());
+            ioInfo.newParams.add(newAlignment);
+
+            builder->setInsertInto(ioInfo.newBodyInsts);
+            IRInst* newOperands[] = {newBuffer, newOffset, newAlignment};
+            auto newVal =
+                builder->emitIntrinsicInst(oldArg->getFullType(), oldArg->getOp(), 3, newOperands);
 
             return newVal;
         }
